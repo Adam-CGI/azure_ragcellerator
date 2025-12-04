@@ -21,7 +21,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
     operator  = "GreaterThan"
 
     contact_emails = [
-      # Add your email here
+      "jammerxs@outlook.com"
     ]
   }
 
@@ -32,7 +32,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
     operator  = "GreaterThan"
 
     contact_emails = [
-      # Add your email here  
+      "jammerxs@outlook.com"
     ]
   }
 
@@ -44,7 +44,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
     threshold_type = "Actual"
 
     contact_emails = [
-      # Add your email here
+      "jammerxs@outlook.com"
     ]
   }
 

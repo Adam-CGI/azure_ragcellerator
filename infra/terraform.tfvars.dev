@@ -17,7 +17,7 @@ search_sku = "basic"
 # Azure OpenAI - Standard (pay per use)
 openai_sku           = "S0"
 embedding_model_name = "text-embedding-ada-002"
-chat_model_name      = "gpt-35-turbo"
+chat_model_name      = "gpt-4o-mini"
 
 # Container Apps - minimal resources, scales to 0
 container_app_cpu    = 0.25  # Minimum

@@ -64,8 +64,8 @@ resource "azurerm_cognitive_deployment" "chat" {
 
   model {
     format  = "OpenAI"
-    name    = "gpt-35-turbo"
-    version = "0613"
+    name    = "gpt-4o-mini"
+    version = "2024-07-18"
   }
 
   scale {
