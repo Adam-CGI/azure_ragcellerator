@@ -1,0 +1,29 @@
+# Azure RAGcelerator - Cost-Conscious Configuration
+# For personal/POV use - minimize spend
+
+# Basic configuration
+resource_group_name = "rg-ragcelerator-dev"
+location            = "eastus"  # Usually cheapest region
+environment         = "dev"
+base_name_prefix    = "ragpov"  # Short prefix to avoid name length issues
+
+# Storage - cheapest option
+storage_replication_type = "LRS"
+
+# Cognitive Search - Basic required for vector search
+# NOTE: This is ~$75/month. Use "free" to save money but lose vector search
+search_sku = "basic"
+
+# Azure OpenAI - Standard (pay per use)
+openai_sku           = "S0"
+embedding_model_name = "text-embedding-ada-002"
+chat_model_name      = "gpt-35-turbo"
+
+# Container Apps - minimal resources, scales to 0
+container_app_cpu    = 0.25  # Minimum
+container_app_memory = "0.5Gi"  # Minimum
+
+# Skip auth for POV (simpler)
+entra_client_id = ""
+entra_tenant_id = ""
+

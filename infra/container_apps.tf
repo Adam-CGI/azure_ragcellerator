@@ -103,8 +103,8 @@ resource "azurerm_container_app" "ui" {
       }
     }
 
-    min_replicas = 0
-    max_replicas = 3
+    min_replicas = 0  # Scale to zero when idle - saves money!
+    max_replicas = 1  # Limit max replicas for POV
   }
 
   ingress {
