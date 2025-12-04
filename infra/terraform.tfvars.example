@@ -1,0 +1,30 @@
+# Azure RAGcelerator - Terraform Variables Example
+# Copy this file to terraform.tfvars and update values
+
+# Basic configuration
+resource_group_name = "rg-ragcelerator"
+location            = "eastus"
+environment         = "dev"
+base_name_prefix    = "ragcel"
+
+# Storage configuration
+storage_replication_type = "LRS"
+
+# Cognitive Search configuration
+search_sku = "basic"
+
+# Azure OpenAI configuration
+openai_sku           = "S0"
+embedding_model_name = "text-embedding-ada-002"
+chat_model_name      = "gpt-35-turbo"
+
+# Container Apps configuration
+container_app_cpu    = 0.5
+container_app_memory = "1Gi"
+
+# Authentication (optional - leave empty to skip Entra ID auth)
+# entra_client_id = "your-client-id"
+# entra_tenant_id = "your-tenant-id"
+
+
+

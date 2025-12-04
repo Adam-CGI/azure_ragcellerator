@@ -1,0 +1,289 @@
+# Azure RAGcelerator - Deploy Pipeline
+# Deploys infrastructure and applications on push to main
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  TERRAFORM_VERSION: "1.5.0"
+  PYTHON_VERSION: "3.11"
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+jobs:
+  terraform:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: infra
+
+    outputs:
+      resource_group_name: ${{ steps.outputs.outputs.resource_group_name }}
+      function_app_name: ${{ steps.outputs.outputs.function_app_name }}
+      container_app_name: ${{ steps.outputs.outputs.container_app_name }}
+      acr_login_server: ${{ steps.outputs.outputs.acr_login_server }}
+      acr_name: ${{ steps.outputs.outputs.acr_name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TF_STATE_CONTAINER }}" \
+            -backend-config="key=ragcelerator-${{ env.ENVIRONMENT }}.tfstate"
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -out=tfplan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Get Terraform Outputs
+        id: outputs
+        run: |
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+          echo "container_app_name=$(terraform output -raw container_app_name)" >> $GITHUB_OUTPUT
+          echo "acr_login_server=$(terraform output -raw container_registry_login_server)" >> $GITHUB_OUTPUT
+          echo "acr_name=$(terraform output -raw container_registry_name)" >> $GITHUB_OUTPUT
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+  provision-index:
+    name: Provision Search Index
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install azure-search-documents azure-identity
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Search Credentials
+        id: search-creds
+        run: |
+          # Get search endpoint and key from Terraform
+          cd infra
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TF_STATE_CONTAINER }}" \
+            -backend-config="key=ragcelerator-${{ env.ENVIRONMENT }}.tfstate"
+          
+          echo "SEARCH_ENDPOINT=$(terraform output -raw search_endpoint)" >> $GITHUB_ENV
+          echo "SEARCH_API_KEY=$(terraform output -raw search_api_key)" >> $GITHUB_ENV
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Provision Search Index
+        run: python -m src.processor.indexers.provision_index
+        env:
+          SEARCH_ENDPOINT: ${{ env.SEARCH_ENDPOINT }}
+          SEARCH_API_KEY: ${{ env.SEARCH_API_KEY }}
+
+  deploy-ui:
+    name: Deploy UI Container
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: |
+          az acr login --name ${{ needs.terraform.outputs.acr_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ needs.terraform.outputs.acr_login_server }}/ragcelerator-ui:${{ github.sha }}
+            ${{ needs.terraform.outputs.acr_login_server }}/ragcelerator-ui:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name ${{ needs.terraform.outputs.container_app_name }} \
+            --resource-group ${{ needs.terraform.outputs.resource_group_name }} \
+            --image ${{ needs.terraform.outputs.acr_login_server }}/ragcelerator-ui:${{ github.sha }}
+
+  deploy-function:
+    name: Deploy Function App
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Azure Functions Core Tools
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+          sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
+          sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list'
+          sudo apt-get update
+          sudo apt-get install -y azure-functions-core-tools-4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Function App
+        run: |
+          cd src/processor
+          func azure functionapp publish ${{ needs.terraform.outputs.function_app_name }} --python
+
+  verify-deployment:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: [terraform, deploy-ui, deploy-function, provision-index]
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Deployment URLs
+        id: urls
+        run: |
+          # Get Container App URL
+          UI_URL=$(az containerapp show \
+            --name ${{ needs.terraform.outputs.container_app_name }} \
+            --resource-group ${{ needs.terraform.outputs.resource_group_name }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "UI_URL=https://$UI_URL" >> $GITHUB_OUTPUT
+          
+          # Get Function App URL
+          FUNC_URL=$(az functionapp show \
+            --name ${{ needs.terraform.outputs.function_app_name }} \
+            --resource-group ${{ needs.terraform.outputs.resource_group_name }} \
+            --query defaultHostName -o tsv)
+          echo "FUNC_URL=https://$FUNC_URL" >> $GITHUB_OUTPUT
+
+      - name: Check Function App Health
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.FUNC_URL }}/api/health" || echo "000")
+          if [ "$response" != "200" ]; then
+            echo "Function App health check failed with status: $response"
+            exit 1
+          fi
+          echo "Function App is healthy!"
+
+      - name: Check UI Health
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.UI_URL }}/_stcore/health" || echo "000")
+          if [ "$response" != "200" ]; then
+            echo "UI health check failed with status: $response"
+            # Don't fail - UI might still be starting
+            echo "::warning::UI health check returned status $response"
+          else
+            echo "UI is healthy!"
+          fi
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Complete! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Group:** ${{ needs.terraform.outputs.resource_group_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Application URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **UI:** ${{ steps.urls.outputs.UI_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function App:** ${{ steps.urls.outputs.FUNC_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Upload a PDF to the \`documents\` container in Storage" >> $GITHUB_STEP_SUMMARY
+          echo "2. Wait for the Function to process it (~30 seconds)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Open the UI and ask questions!" >> $GITHUB_STEP_SUMMARY
+
+
+

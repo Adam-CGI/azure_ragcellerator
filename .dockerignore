@@ -1,0 +1,70 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.venv
+venv
+ENV
+env
+.eggs
+*.egg-info
+*.egg
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.tox
+.nox
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Terraform
+infra/
+.terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+
+# Azure Functions (not needed in UI container)
+src/processor/local.settings.json
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+pytest.ini
+.coveragerc
+
+# CI/CD
+.github/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Misc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+
+

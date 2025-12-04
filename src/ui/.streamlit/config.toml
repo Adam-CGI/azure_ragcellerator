@@ -1,0 +1,28 @@
+[server]
+headless = true
+address = "0.0.0.0"
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[theme]
+base = "dark"
+primaryColor = "#0078D4"  # Azure Blue
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
+font = "sans serif"
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"
+
+[runner]
+magicEnabled = true
+
+
+
